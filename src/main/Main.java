@@ -1,9 +1,13 @@
 package main;
 
+import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import classes.Product;
+import com.opencsv.CSVReader;
+import com.opencsv.exceptions.CsvException;
+
 import java.util.logging.Logger;
 
 import java.util.*;
@@ -18,19 +22,20 @@ public class Main {
 
 
     public static List<Product> loadData(String dataloc){
-        List<String> lines = null;
-        try {
-            lines = Files.readAllLines(Path.of(dataloc));
-        } catch (IOException e) {
+        List<String[]> lines = null;
+        try(CSVReader reader = new CSVReader(new FileReader(Path.of(dataloc).toFile()))) {
+            lines = reader.readAll();
+        } catch (IOException | CsvException e) {
             throw new RuntimeException(e);
         }
 
-        String[] headers = lines.get(0).split(",");
+        String[] headers = lines.get(0);
+        System.out.println(Arrays.toString(headers));
 
         List<Product> products = new ArrayList<>();
 
         for (int i = 1; i < lines.size(); i++) {
-            String[] values = lines.get(i).split(",");
+            String[] values = lines.get(i);
             Map<String, String> row = new HashMap<>();
 
             for (int j = 0; j < headers.length; j++) {
@@ -78,6 +83,7 @@ public class Main {
 
         List<Product> mergedProducts = merged.join();
 
+
 //        mergedProducts.stream()
 //                .sorted(
 //                        Comparator
@@ -90,7 +96,7 @@ public class Main {
 
 
 //        Map<Character,List<Product>> grouped =
-        products.stream()
+        mergedProducts.stream()
                 .collect(
                         Collectors.groupingBy(
                                 product -> product.data().get("SIC Code")
