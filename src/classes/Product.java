@@ -3,9 +3,7 @@ package classes;
 import java.util.*;
 
 
-public record Product(Map<String,String> data){
-
-}
+public record Product(Map<String,String> data){}
 
 //public class Product {
 //    private final Map<String,String> data;
