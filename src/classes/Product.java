@@ -3,7 +3,7 @@ package classes;
 import java.util.*;
 
 public class Product {
-    private Map<String,String> data;
+    private final Map<String,String> data;
 
     public Product(Map<String,String> data){
         this.data = data;
