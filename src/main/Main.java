@@ -1,43 +1,53 @@
 package main;
 
-import java.io.FileReader;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import classes.Product;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
 
-import java.util.logging.Logger;
-
+import java.io.FileReader;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
-//TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
-// click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 public class Main {
-    private static final Logger log =
-            Logger.getLogger(Main.class.getName());
 
+    // Simple logger could not use  @Slf4j as this isnt a maven project
+    private static final Logger log = Logger.getLogger(Main.class.getName());
 
-    public static List<Product> loadData(String dataloc){
-        List<String[]> lines = null;
-        try(CSVReader reader = new CSVReader(new FileReader(Path.of(dataloc).toFile()))) {
+    /**
+     * Loads CSV file into List<Product>
+     * Each row is converted into Map<columnName, value>
+     */
+    public static List<Product> loadData(String dataLoc) {
+
+        List<String[]> lines;
+
+        // OpenCSV reader to handle CSV properly
+        try (CSVReader reader =
+                     new CSVReader(new FileReader(Path.of(dataLoc).toFile()))) {
+
             lines = reader.readAll();
+
         } catch (IOException | CsvException e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Failed to read CSV: " + dataLoc, e);
         }
 
+        // Get first row which are our headers
         String[] headers = lines.get(0);
-        System.out.println(Arrays.toString(headers));
+        System.out.println("Headers: " + Arrays.toString(headers));
 
         List<Product> products = new ArrayList<>();
 
+        // Start from 1 to skip header row)
         for (int i = 1; i < lines.size(); i++) {
+
             String[] values = lines.get(i);
             Map<String, String> row = new HashMap<>();
 
+            // Map each column name → value
             for (int j = 0; j < headers.length; j++) {
                 row.put(headers[j].trim(), values[j].trim());
             }
@@ -50,87 +60,88 @@ public class Main {
 
     public static void main(String[] args) {
 
-        List<Product> products =  loadData("./industry_sic.csv");
+        // Load CSVs concurrently
+        CompletableFuture<List<Product>> industry =
+                CompletableFuture.supplyAsync(() -> {
+                    log.info("Loading industry CSV");
+                    return loadData("./industry_sic.csv");
+                });
 
-        CompletableFuture<List<Product>> industry = CompletableFuture.supplyAsync(()->{
-            log.info("Loading industry CSV");
-           return loadData("./industry_sic.csv");
-        });
+        CompletableFuture<List<Product>> colors =
+                CompletableFuture.supplyAsync(() -> {
+                    log.info("Loading color CSV");
+                    return loadData("./color_srgb.csv");
+                });
 
 
-        CompletableFuture<List<Product>> colors = CompletableFuture.supplyAsync(()->{
-            return loadData("./color_srgb.csv");
-        });
-
+        // Cartesian merge
+        // ie add columns of 2nd CSV to the left of the columns of the original CSV
         CompletableFuture<List<Product>> merged =
-                industry.thenCombine(
-                        colors,
-                        (industries,color) -> {
-                            List<Product> result = new ArrayList<>();
+                industry.thenCombine(colors, (industries, colorList) -> {
 
-                            for(Product ind : industries){
-                                for(Product col : color){
-                                    Map<String, String> mergedRow = new HashMap<>();
-                                    mergedRow.putAll(ind.data());
-                                    mergedRow.putAll(col.data());
+                    List<Product> result = new ArrayList<>();
 
-                                    result.add(new Product(mergedRow));
-                                }
-                            }
-                            return result;
+                    for (Product ind : industries) {
+                        for (Product col : colorList) {
+
+                            // Merge both maps into one row
+                            Map<String, String> mergedRow = new HashMap<>();
+
+                            mergedRow.putAll(ind.data());
+                            mergedRow.putAll(col.data());
+
+                            result.add(new Product(mergedRow));
                         }
-                );
+                    }
+
+                    return result;
+                });
 
         List<Product> mergedProducts = merged.join();
 
 
-//        mergedProducts.stream()
-//                .sorted(
-//                        Comparator
-//                                .comparingInt(
-//                                        (Product product) -> Integer.parseInt(
-//                                                product.data().get("SIC Code")
-//                                        )
-//                                ).reversed()
-//                ).forEach(System.out::println);
+        // Group counts by first digit of SIC Code
 
-
-//        Map<Character,List<Product>> grouped =
         mergedProducts.stream()
-                .collect(
-                        Collectors.groupingBy(
-                                product -> product.data().get("SIC Code")
-                                        .charAt(
-                                                product.data().get("SIC Code")
-                                                        .length() - 2
-                                        )
-                        )
-                )
-                .forEach(
-                        (key, value)->
-                        {
-                            System.out.println(key + " " + value);
-                        });
-
-        Optional<Product> code = products.stream()
-                .max(
-                        Comparator.comparingInt(
-                                product -> Integer.parseInt(
-                                        product.data().get("SIC Code")
-                                )
-                        )
+                .collect(Collectors.groupingBy(
+                        product -> product.data().get("SIC Code").charAt(0),
+                        Collectors.counting()
+                ))
+                .forEach((key, value) ->
+                        System.out.println("Group " + key + " → " + value)
                 );
 
-        code.ifPresent(System.out::println);
 
-        int sum = products.stream()
-                .mapToInt(
+        // Group sample (limited output)
+        // second last digit of SIC Code
+
+        mergedProducts.stream()
+                .limit(1000)
+                .collect(Collectors.groupingBy(
+                        product -> {
+                            String code = product.data().get("SIC Code");
+                            return code.charAt(code.length() - 2);
+                        }
+                ))
+                .forEach((key, value) ->
+                        System.out.println(key + " → " + value)
+                );
+
+
+        // Max SIC Code from original dataset
+        Optional<Product> maxCode = mergedProducts.stream()
+                .max(Comparator.comparingInt(
                         p -> Integer.parseInt(p.data().get("SIC Code"))
-                ).sum();
+                ));
 
-        System.out.println(sum);
+        maxCode.ifPresent(System.out::println);
+
+
+        // Sum SIC Codes
+        int sum = mergedProducts.stream()
+                .mapToInt(p -> Integer.parseInt(p.data().get("SIC Code")))
+                .sum();
+
+        System.out.println("Sum = " + sum);
     }
-
-
-
 }
